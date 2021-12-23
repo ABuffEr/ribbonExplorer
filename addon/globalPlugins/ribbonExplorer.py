@@ -12,6 +12,8 @@ from keyboardHandler import KeyboardInputGesture as InputGesture
 import braille
 import inspect
 from NVDAObjects.IAccessible import IAccessible
+from logHandler import log
+import review
 # for compatibility
 REASON_FOCUS = ct.OutputReason.FOCUS if hasattr(ct, "OutputReason") else ct.REASON_FOCUS
 if hasattr(ct, 'Role'):
@@ -63,7 +65,6 @@ It's all, for now...
 DEBUG = False
 
 def debugLog(message):
-	from logHandler import log
 	if DEBUG:
 		log.info(message)
 
@@ -132,6 +133,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	# starting variables
 	exploring = False
+	startReviewMode = None
 	userObj = None
 	userObjHasFocus = False
 	menubar = []
@@ -245,7 +247,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		elif obj.role == roles.TABCONTROL:
 			debugLog("Mute %s"%obj.role)
 			obj.presentationType = "layout"
-			self.subtab = obj
 			return
 		elif self.isExpandingMenu:
 			# self.userObj should be a menu tab, set by last gainFocus
@@ -314,6 +315,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def explorationStart(self):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
 		self.exploring = True
+		ui.message("Start exploration")
+		self.startReviewMode = review.getCurrentMode()
+		review.setCurrentMode("object", updateReviewPosition=False)
 		self.userObj = api.getFocusObject()
 		self.userObjHasFocus = True
 		# simple gestures
@@ -328,6 +332,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def explorationEnd(self):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
 		self.exploring = False
+		ui.message("Exploration end")
+		review.setCurrentMode(self.startReviewMode, updateReviewPosition=False)
+		self.startReviewMode = None
 		self.userObj = None
 		self.userObjHasFocus = False
 		self.menubar.clear()
