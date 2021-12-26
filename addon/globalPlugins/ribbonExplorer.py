@@ -58,7 +58,6 @@ It's all, for now...
 # todo: settings dialog
 # todo: make a option for superEsc
 # todo: return to menubar consistently
-# todo: consider to check appModule.productName for Office
 # todo: fix alt+downArrow in v1 and v3 expanding menubar items
 
 # to enable logging
@@ -515,7 +514,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def expandedMenuAction(self):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
-		groupMenu = self.expandedMenu[-1]
+		try:
+			groupMenu = self.expandedMenu[-1]
+		except IndexError:
+			self.explorationEnd()
+			return
 		newObj = groupMenu.simpleFirstChild
 		if newObj.name in groupMenu.name:
 			self.layoutableObj.append(newObj)
