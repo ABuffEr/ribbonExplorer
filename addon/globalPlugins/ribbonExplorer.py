@@ -131,6 +131,7 @@ class EditWithoutSelection(IAccessible):
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	# starting variables
+	supportedApp = False
 	exploring = False
 	startReviewMode = None
 	userObj = None
@@ -224,9 +225,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			debugLog("Role %s, set unavailable"%obj.role)
 			obj.presentationType = "unavailable"
 
+	def event_foreground(self, obj, nextHandler):
+		nextHandler()
+		if isOffice(obj):
+			self.supportedApp = True
+		else:
+			self.supportedApp = False
+
 	def event_focusEntered(self, obj, nextHandler):
-		if not isOffice(obj):
-			# don't process, for now
+		if not self.supportedApp:
 			nextHandler()
 			return
 		elif not self.exploring and isRibbonRoot(obj):

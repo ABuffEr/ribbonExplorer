@@ -25,4 +25,4 @@ If there are problems, or you want temporarily interact without add-on assistanc
 Enjoy! 🙂
 
 
-[dev]: https://github.com/ABuffEr/ribbonExplorer/releases/download/dev/ribbonExplorer-20211226-dev.nvda-addon
+[dev]: https://github.com/ABuffEr/ribbonExplorer/releases/download/dev/ribbonExplorer-20211227-dev.nvda-addon
