@@ -67,9 +67,10 @@ def debugLog(message):
 	if DEBUG:
 		log.info(message)
 
-def isOffice(obj):
+def isOfficeApp(obj):
 	try:
-		if obj.appModule.productName == "Microsoft Office":
+		# check from nvda\source\UIAHandler\__init__.py
+		if obj.appModule.productName.startswith(("Microsoft Office", "Microsoft Outlook")):
 			return True
 	except:
 		pass
@@ -227,7 +228,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def event_foreground(self, obj, nextHandler):
 		nextHandler()
-		if isOffice(obj):
+		if isOfficeApp(obj):
 			self.supportedApp = True
 		else:
 			self.supportedApp = False
@@ -321,7 +322,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def explorationStart(self):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
 		self.exploring = True
-		ui.message("Start exploration")
+#		ui.message("Start exploration")
 		self.startReviewMode = review.getCurrentMode()
 		review.setCurrentMode("object", updateReviewPosition=False)
 		self.userObj = api.getFocusObject()
@@ -338,7 +339,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def explorationEnd(self):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
 		self.exploring = False
-		ui.message("Exploration end")
+#		ui.message("Exploration end")
 		review.setCurrentMode(self.startReviewMode, updateReviewPosition=False)
 		self.startReviewMode = None
 		self.userObj = None
@@ -469,7 +470,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self.userObjHasFocus = True
 			speech.speakObject(obj, reason=REASON_FOCUS)
 			braille.handler.handleGainFocus(obj)
-		else:
+		if not self.userObjHasFocus:
 			try:
 				obj.setFocus()
 				self.userObjHasFocus = True
@@ -491,8 +492,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			prevObj.setFocus()
 			InputGesture.fromName("tab").send()
 			# remark after prevObj.setFocus()
-			self.userObj = api.getFocusObject()
-			self.userObjHasFocus = True
+			curFocus = api.getFocusObject()
+			if curFocus == obj:
+				debugLog("Focus moved successfully!")
+				self.userObjHasFocus = True
 		else:
 			# guarantee an output, userObj vars should be untouched
 			speech.speakObject(obj, reason=REASON_FOCUS)
@@ -555,7 +558,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def expandedSubmenuAction(self):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
-		groupMenu = self.expandedSubmenu[-1]
+		try:
+			groupMenu = self.expandedSubmenu[-1]
+		except IndexError:
+			self.explorationEnd()
+			return
 		newObj = groupMenu.simpleFirstChild
 		if not newObj.isFocusable and newObj.name in groupMenu.name:
 			self.layoutableObj.append(newObj)
