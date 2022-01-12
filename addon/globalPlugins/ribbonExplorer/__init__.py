@@ -4,7 +4,6 @@
 import globalPluginHandler
 import addonHandler
 import controlTypes as ct
-import globalVars
 import ui
 import api
 import speech
@@ -12,8 +11,9 @@ from keyboardHandler import KeyboardInputGesture as InputGesture
 import braille
 import inspect
 from NVDAObjects.IAccessible import IAccessible
-from logHandler import log
 import review
+import scriptHandler
+from .utils import *
 # for compatibility
 REASON_FOCUS = ct.OutputReason.FOCUS if hasattr(ct, "OutputReason") else ct.REASON_FOCUS
 if hasattr(ct, 'Role'):
@@ -24,6 +24,9 @@ if hasattr(ct, 'State'):
 	states = ct.State
 else:
 	states = type('Enum', (), dict([(x.split("STATE_")[1], getattr(ct, x)) for x in dir(ct) if x.startswith("STATE_")]))
+# to take advantages from NVDA translations
+NVDALocale = _
+addonHandler.initTranslation()
 
 """
 **Important dev info:**
@@ -60,90 +63,34 @@ It's all, for now...
 # todo: return to menubar consistently
 # todo: fix alt+downArrow in v1 and v3 expanding menubar items
 
-# to enable logging
-DEBUG = False
-
-def debugLog(message):
-	if DEBUG:
-		log.info(message)
-
-def isOfficeApp(obj):
-	try:
-		# check from nvda\source\UIAHandler\__init__.py
-		if obj.appModule.productName.startswith(("Microsoft Office", "Microsoft Outlook")):
-			return True
-	except:
-		pass
-	return False
-
-def isRibbonRoot(obj):
-	debugLog("Running %s"%inspect.currentframe().f_code.co_name)
-	if obj.name == "Ribbon" and obj.role == roles.PANE:
-		return True
-	return False
-
-def isSubtab(obj):
-	debugLog("Running %s"%inspect.currentframe().f_code.co_name)
-	if obj.role == roles.PANE and hasattr(obj, "UIAElement") and obj.UIAElement.cachedClassName == "NetUIPanViewer" and (
-			# in v1 and v2
-			(obj.name)
-			or
-			# in v3
-			# parent check avoid problems in submenu
-			(not obj.name and obj.parent.name and obj.parent.role == roles.GROUPING and hasattr(obj.parent, "UIAElement") and obj.parent.UIAElement.cachedClassName == "NetUIElement")
-		):
-		return True
-	return False
-
-def isRibbonInAncestors():
-	debugLog("Running %s"%inspect.currentframe().f_code.co_name)
-	for obj in reversed(globalVars.focusAncestors):
-		if isRibbonRoot(obj):
-			return True
-	return False
-
-def allObjPassCheck(check, objects):
-	for obj in objects:
-		if not check(obj):
-			return False
-	return True
-
-def findFirstFocusable(obj):
-	for descendant in obj.recursiveDescendants:
-		if descendant.isFocusable:
-			return descendant
-
-def findFocusablePrevious(obj):
-	res = obj.simplePrevious
-	if not res:
-		res = obj.simpleParent.simplePrevious
-	if res:
-		if res.isFocusable:
-			return res
-		elif res.childCount:
-			return res.simpleLastChild
-
-class EditWithoutSelection(IAccessible):
-
-	def script_caret_moveByLine(self, gesture):
-		self.terminateAutoSelectDetection()
-		super(EditWithoutSelection, self).script_caret_moveByLine(gesture)
-
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	# starting variables
+	# to speed-up negative check in event_focusEntered
 	supportedApp = False
+	# determine if Ribbon exploration is active
 	exploring = False
+	# save and then restore initial review mode
 	startReviewMode = None
+	# keep track of object presented to the user by the add-on
 	userObj = None
+	# keep of userObj focus status (see reportUser)
 	userObjHasFocus = False
+	# to go back on expanded tab in menubar (see collapseMenu)
 	menubar = []
+	# list of objects to hide keeping their children
 	layoutableObj = []
+	# to adjust focus when expanding a menu tab
 	isExpandingMenu = False
+	# list expanded menu tab (ideally one)
 	expandedMenu = []
+	# to adjust focus when expanding a submenu
 	isExpandingSubmenu = False
+	# list expanded submenus (potentially nested)
 	expandedSubmenu = []
+	# to control events and avoid focus problems/lost
 	isCollapsingSubmenu = False
+	# list of initial menu item(s) expanded in a submenu
 	collapsingMenuItem = []
 
 	def chooseNVDAObjectOverlayClasses(self, obj, clsList):
@@ -152,79 +99,83 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		debugLog("Running %s for obj %s,%s"%(inspect.currentframe().f_code.co_name,obj.name,obj.role))
 		if obj.role == roles.EDITABLETEXT and isRibbonRoot(obj.simpleParent):
 			clsList.insert(0, EditWithoutSelection)
+			return
 		if isRibbonRoot(obj):
 			# to simplify check of menubar items
 			debugLog("Root, set content")
-			obj.presentationType = "content"
+			obj.presentationType = obj.presType_content
+			# speed-up: always return immediately
 			return
 		elif obj in self.layoutableObj:
 			debugLog("Redundant obj whose we want children of, set layout")
-			obj.presentationType = "layout"
+			obj.presentationType = obj.presType_layout
+			return
 		elif not obj.name and obj.role == roles.MENUITEM:
 			debugLog("Anonymous menuitem, set layout")
-			obj.presentationType = "layout"
+			obj.presentationType = obj.presType_layout
 			return
 		elif obj.role == roles.TABCONTROL:
 			# to simplify menubar exploration (enforcing)
 			debugLog("Role tabcontrol, set layout")
-			obj.presentationType = "layout"
+			obj.presentationType = obj.presType_layout
 			return
 		elif isSubtab(obj):
 			debugLog("Subtab, set content")
-			obj.presentationType = "content"
+			obj.presentationType = obj.presType_content
 			return
 		elif obj in self.expandedMenu:
 			# for expanded menu
 			debugLog("ExpandedMenu, set layout")
-			obj.presentationType = "layout"
+			obj.presentationType = obj.presType_layout
 			return
 		elif obj.role == roles.POPUPMENU and not obj.states:
 			# to select this as simpleParent when closing submenu
-			debugLog("Role popupmenu w/ states, set content")
-			obj.presentationType = "content"
+			debugLog("Role popupmenu without states, set content")
+			obj.presentationType = obj.presType_content
 			return
 		elif hasattr(obj, "UIAElement") and obj.UIAElement.cachedClassName in ("NetUIRepeatButton", "NetUIScrollBar", "NetUIAppFrameHelper"):
 			# to hide scrolling and window-action buttons
 			debugLog("CachedClassName %s, set unavailable"%obj.UIAElement.cachedClassName)
-			obj.presentationType = "unavailable"
+			obj.presentationType = obj.presType_unavailable
 			return
 		elif not obj.name:
 			# generic
 			debugLog("Anonymous obj, set layout")
-			obj.presentationType = "layout"
+			obj.presentationType = obj.presType_layout
 			return
-		elif obj.presentationType == "unavailable":
+		elif obj.presentationType == obj.presType_unavailable:
 			# for menu items not currently available,
 			# but which we want to show to users
 			debugLog("PresType unavailable, set content")
-			obj.presentationType = "content"
+			obj.presentationType = obj.presType_content
 			return
 		elif obj.role == roles.DATAGRID and obj.description:
 			# to hide in grouping (it should be a grid associated to a visible button)
 			debugLog("Role datagrid has description, set unavailable")
-			obj.presentationType = "unavailable"
+			obj.presentationType = obj.presType_unavailable
 			return
 		elif obj.role == roles.DATAGRID and not obj.description:
 			# to show in submenu
-			if allObjPassCheck(lambda i: i.role == roles.GROUPING and i.presentationType == "content", obj.children):
-				obj.presentationType = "layout"
-				return
+			if allObjPassCheck(lambda i: i.role == roles.GROUPING and i.presentationType == i.presType_content, obj.children):
+				obj.presentationType = obj.presType_layout
 			else:
 				# ...manage other cases
 				debugLog("...set content")
-				obj.presentationType = "content"
-				return
+				obj.presentationType = obj.presType_content
+			return
 		elif obj.role == roles.LIST:
 			# to explore children only
 			debugLog("Role list, set layout")
-			obj.presentationType = "layout"
+			obj.presentationType = obj.presType_layout
+			return
 		elif obj.role == roles.GROUPING:
 			debugLog("Role grouping, set content")
-			obj.presentationType = "content"
+			obj.presentationType = obj.presType_content
+			return
 		elif obj.role in (roles.GRAPHIC, roles.STATICTEXT):
 			# rare and useless, hide
 			debugLog("Role %s, set unavailable"%obj.role)
-			obj.presentationType = "unavailable"
+			obj.presentationType = obj.presType_unavailable
 
 	def event_foreground(self, obj, nextHandler):
 		nextHandler()
@@ -239,7 +190,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			return
 		elif not self.exploring and isRibbonRoot(obj):
 			debugLog("Exploration starts")
-			obj.presentationType = "content"
+			obj.presentationType = obj.presType_content
 			self.explorationStart()
 			return
 		elif not self.exploring:
@@ -249,11 +200,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		debugLog("Running %s for obj %s,%s"%(inspect.currentframe().f_code.co_name,obj.name,obj.role))
 		if obj.role == roles.MENUITEM and isRibbonRoot(obj.parent):
 			# in v1
-			obj.presentationType = "layout"
+			obj.presentationType = obj.presType_layout
 			return
 		elif obj.role == roles.TABCONTROL:
 			debugLog("Mute %s"%obj.role)
-			obj.presentationType = "layout"
+			obj.presentationType = obj.presType_layout
 			return
 		elif self.isExpandingMenu:
 			# self.userObj should be a menu tab, set by last gainFocus
@@ -322,7 +273,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def explorationStart(self):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
 		self.exploring = True
-#		ui.message("Start exploration")
 		self.startReviewMode = review.getCurrentMode()
 		review.setCurrentMode("object", updateReviewPosition=False)
 		self.userObj = api.getFocusObject()
@@ -333,13 +283,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self.bindGesture("kb:shift+tab", "shiftTab")
 		self.bindGesture("kb:alt+upArrow", "altUpArrow")
 		self.bindGesture("kb:alt+downArrow", "altDownArrow")
-		# for debugging
 		self.bindGesture("kb:NVDA+space", "toggleExploration")
 
 	def explorationEnd(self):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
 		self.exploring = False
-#		ui.message("Exploration end")
 		review.setCurrentMode(self.startReviewMode, updateReviewPosition=False)
 		self.startReviewMode = None
 		self.userObj = None
@@ -413,7 +361,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if states.OFFSCREEN in self.userObj.states:
 			self.userObj.doAction()
 		elif not self.userObjHasFocus or states.UNAVAILABLE in self.userObj.states:
-			ui.message(_("Action not available here"))
+			ui.message(NVDALocale("No action"))
 		elif isRibbonRoot(self.userObj.simpleParent):
 			self.expandMenu(self.userObj)
 		# splitbutton must perform default action on enter
@@ -429,12 +377,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		elif self.expandedMenu:
 			self.collapseMenu()
 		else:
-			ui.message(_("Action not available here"))
+			ui.message(NVDALocale("No action"))
 
 	def script_altDownArrow(self, gesture):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
 		if not self.userObjHasFocus or states.UNAVAILABLE in self.userObj.states:
-			ui.message(_("Action not available here"))
+			ui.message(NVDALocale("No action"))
 		elif isRibbonRoot(self.userObj.simpleParent):
 			self.expandMenu(self.userObj)
 		elif states.COLLAPSED in self.userObj.states:
@@ -443,15 +391,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def script_toggleExploration(self, gesture):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
 		if self.exploring:
+			# Translators: a message when user manually disable exploration (NVDA+space)
+			ui.message(_("Exploration end"))
 			self.explorationEnd()
-		else:
-			self.explorationStart()
-
-	def script_objInfo(self, gesture):
-		obj = api.getNavigatorObject()
-		prop = obj.presentationType
-		parObj = obj.simpleParent
-		ui.message(''.join([prop, parObj.name, str(parObj.role)]))
 
 	def reportUser(self, obj):
 		# it should not happen, but anyway...
@@ -479,25 +421,48 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				self.forceFocus(obj)
 
 	def forceFocus(self, obj):
-		# workaround: find previous focusable obj,
-		# focus it, then simulate a tab
-		# to get focus on obj we want
-		# (not applicable to offscreen obj)
+		debugLog("Forcing focus on %s,%s"%(obj.name, obj.role))
+		# offscreen obj can be reported only
 		if states.OFFSCREEN in obj.states:
-			prevObj = None
-		else:
-			prevObj = findFocusablePrevious(obj)
-		if prevObj:
-			debugLog("Found prevObj %s"%prevObj.name)
-			prevObj.setFocus()
+			speech.speakObject(obj, reason=REASON_FOCUS)
+			braille.handler.handleGainFocus(obj)
+			return
+		# workaround: find previous/next focusable obj,
+		# focus it, then simulate a tab/shift+tab
+		# to get focus on obj we want
+		tryAgain = True
+		prevObj = findFocusablePrevious(obj)
+		if moveFocusTo(prevObj):
+			debugLog("prevObj.setFocus() success; send tab")
 			InputGesture.fromName("tab").send()
-			# remark after prevObj.setFocus()
-			curFocus = api.getFocusObject()
-			if curFocus == obj:
-				debugLog("Focus moved successfully!")
-				self.userObjHasFocus = True
+			tryAgain = False
 		else:
-			# guarantee an output, userObj vars should be untouched
+			nextObj = findFocusableNext(obj)
+			if moveFocusTo(nextObj):
+				debugLog("nextObj.setFocus() success; send shift+tab")
+				InputGesture.fromName("shift+tab").send()
+				tryAgain = False
+		if tryAgain:
+			# the last hope: send tab/shift+tab without knowing where the focus is
+			# but first, understand what direction we're moving to
+			scriptRef = scriptHandler._lastScriptRef
+			if scriptRef and scriptRef().__name__ in ("script_tab", "script_downArrow", "script_rightArrow"):
+				debugLog("Send tab blindly")
+				InputGesture.fromName("tab").send()
+			elif scriptRef:
+				debugLog("Send shift+tab blindly")
+				InputGesture.fromName("shift+tab").send()
+		# and now, see where focus is
+		curFocus = api.getFocusObject()
+		if (curFocus.name, curFocus.role) == (obj.name, obj.role):
+			debugLog("Focus moved successfully")
+			self.userObj = curFocus
+			self.userObjHasFocus = True
+		else:
+			# guarantee an output
+			debugLog("Moving focus definitely failed")
+			self.userObj = obj
+			self.userObjHasFocus = False
 			speech.speakObject(obj, reason=REASON_FOCUS)
 			braille.handler.handleGainFocus(obj)
 
@@ -527,6 +492,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		try:
 			groupMenu = self.expandedMenu[-1]
 		except IndexError:
+			# Translators: a message when something goes wrong and exploration ends
+			ui.message(_("Exploration end"))
 			self.explorationEnd()
 			return
 		newObj = groupMenu.simpleFirstChild
@@ -546,6 +513,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def expandSubmenu(self, submenu):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
+		if states.UNAVAILABLE in submenu.states:
+			# submenu cannot be expanded
+			return
 		self.collapsingMenuItem.append(submenu)
 		if not self.userObjHasFocus and submenu.role == roles.COMBOBOX:
 			debugLog("Try to focus a child")
@@ -561,6 +531,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		try:
 			groupMenu = self.expandedSubmenu[-1]
 		except IndexError:
+			# Translators: a message when something goes wrong and exploration ends
+			ui.message(_("Exploration end"))
 			self.explorationEnd()
 			return
 		newObj = groupMenu.simpleFirstChild
@@ -639,7 +611,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			debugLog("No curSubmenu")
 			curSubmenu = None
 		if parObj == curSubmenu:
-			debugLog("Submenu condition!")
+			debugLog("Submenu condition")
 			self.collapseSubmenu()
 			return
 		self.reportUser(parObj)
@@ -653,3 +625,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			childObj = self.userObj.simpleFirstChild
 		if childObj:
 			self.reportUser(childObj)
+
+class EditWithoutSelection(IAccessible):
+
+	def script_caret_moveByLine(self, gesture):
+		# avoid "selected" announcement
+		self.terminateAutoSelectDetection()
+		super(EditWithoutSelection, self).script_caret_moveByLine(gesture)
