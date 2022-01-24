@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 # Author: Alberto Buffolino
-# License: GPLv3
+# License: GPLv2
 import controlTypes as ct
 import globalVars
 import inspect

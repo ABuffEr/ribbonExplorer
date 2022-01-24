@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 # Author: Alberto Buffolino
-# License: GPLv3
+# License: GPLv2
 import globalPluginHandler
 import addonHandler
 import controlTypes as ct
