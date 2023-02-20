@@ -1,5 +1,7 @@
 # RibbonExplorer
 
+Note: this add-on is not actively supported, mainly for lackness of users interest (the author still use it when forced to work with Office applications). If you find an issue, try to contact the author, but there will be no guarantee to resolution.
+
 * Author: Alberto Buffolino
 * Download [development version][dev]
 * NVDA compatibility: 2017.3 and beyond
