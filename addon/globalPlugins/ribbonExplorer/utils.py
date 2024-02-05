@@ -33,12 +33,16 @@ def isOfficeApp(obj):
 
 def isRibbonRoot(obj):
 	debugLog("Running %s"%inspect.currentframe().f_code.co_name)
+	if not obj:
+		return False
 	if obj.name == "Ribbon" and obj.role == roles.PANE:
 		return True
 	return False
 
 def isSubtab(obj):
 	debugLog("Running %s"%inspect.currentframe().f_code.co_name)
+	if not obj:
+		return False
 	if obj.role == roles.PANE and hasattr(obj, "UIAElement") and obj.UIAElement.cachedClassName == "NetUIPanViewer" and (
 			# in v1 and v2
 			(obj.name)
