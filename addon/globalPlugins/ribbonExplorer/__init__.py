@@ -1,6 +1,7 @@
 # -*- coding: UTF-8 -*-
 # Author: Alberto Buffolino
 # License: GPLv2
+from tones import beep
 import globalPluginHandler
 import addonHandler
 import controlTypes as ct
@@ -96,6 +97,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def chooseNVDAObjectOverlayClasses(self, obj, clsList):
 		if not self.exploring:
 			return
+		if not obj:
+			return
 		debugLog("Running %s for obj %s,%s"%(inspect.currentframe().f_code.co_name,obj.name,obj.role))
 		if obj.role == roles.EDITABLETEXT and isRibbonRoot(obj.simpleParent):
 			clsList.insert(0, EditWithoutSelection)
@@ -138,7 +141,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			debugLog("CachedClassName %s, set unavailable"%obj.UIAElement.cachedClassName)
 			obj.presentationType = obj.presType_unavailable
 			return
-		elif not obj.name:
+		elif not obj.name or obj.name.isspace():
 			# generic
 			debugLog("Anonymous obj, set layout")
 			obj.presentationType = obj.presType_layout
@@ -284,6 +287,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self.bindGesture("kb:alt+upArrow", "altUpArrow")
 		self.bindGesture("kb:alt+downArrow", "altDownArrow")
 		self.bindGesture("kb:NVDA+space", "toggleExploration")
+		# for debug
+#		self.bindGesture("kb:i", "debug")
 
 	def explorationEnd(self):
 		debugLog("Running %s"%inspect.currentframe().f_code.co_name)
@@ -395,6 +400,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			ui.message(_("Exploration end"))
 			self.explorationEnd()
 
+	def script_debug(self, gesture):
+		ui.message("Performing debug script")
+		obj = api.getNavigatorObject()
+		obj.UIALegacyIAccessiblePattern.Select(2)
+
 	def reportUser(self, obj):
 		# it should not happen, but anyway...
 		if obj is None:
@@ -431,12 +441,25 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# focus it, then simulate a tab/shift+tab
 		# to get focus on obj we want
 		tryAgain = True
-		prevObj = findFocusablePrevious(obj)
-		if moveFocusTo(prevObj):
-			debugLog("prevObj.setFocus() success; send tab")
-			InputGesture.fromName("tab").send()
-			tryAgain = False
-		else:
+		if obj.positionInfo: #and obj.positionInfo["indexInGroup"] not in (1, obj.positionInfo["similarItemsInGroup"]):
+			scriptRef = scriptHandler._lastScriptRef
+			if scriptRef and scriptRef().__name__ in ("script_downArrow",): #"script_rightArrow"):
+				debugLog("Send downArrow in list")
+				InputGesture.fromName("downArrow").send()
+				tryAgain = False
+			elif scriptRef and scriptRef().__name__ in ("script_upArrow",):
+				debugLog("Send upArrow in list")
+				InputGesture.fromName("upArrow").send()
+				speech.speakObject(obj, reason=REASON_FOCUS)
+				braille.handler.handleGainFocus(obj)
+				tryAgain = False
+		if tryAgain:
+			prevObj = findFocusablePrevious(obj)
+			if moveFocusTo(prevObj):
+				debugLog("prevObj.setFocus() success; send tab")
+				InputGesture.fromName("tab").send()
+				tryAgain = False
+		if tryAgain:
 			nextObj = findFocusableNext(obj)
 			if moveFocusTo(nextObj):
 				debugLog("nextObj.setFocus() success; send shift+tab")
