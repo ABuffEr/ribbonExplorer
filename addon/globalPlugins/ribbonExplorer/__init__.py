@@ -11,6 +11,7 @@ import speech
 from keyboardHandler import KeyboardInputGesture as InputGesture
 import braille
 import inspect
+from NVDAObjects import NVDAObject
 from NVDAObjects.IAccessible import IAccessible
 import review
 import scriptHandler
@@ -64,6 +65,11 @@ It's all, for now...
 # todo: return to menubar consistently
 # todo: fix alt+downArrow in v1 and v3 expanding menubar items
 
+# speed-up
+content = NVDAObject.presType_content
+layout = NVDAObject.presType_layout
+unavailable = NVDAObject.presType_unavailable
+
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	# starting variables
@@ -99,86 +105,89 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			return
 		if not obj:
 			return
-		debugLog("Running %s for obj %s,%s"%(inspect.currentframe().f_code.co_name,obj.name,obj.role))
-		if obj.role == roles.EDITABLETEXT and isRibbonRoot(obj.simpleParent):
+#		debugLog("Running %s for obj %s,%s"%(inspect.currentframe().f_code.co_name,obj.name, obj.role))
+		# speed-up
+		global content, layout, unavailable
+		objRole = obj.role
+		if objRole == roles.EDITABLETEXT and isRibbonRoot(obj.simpleParent):
 			clsList.insert(0, EditWithoutSelection)
 			return
 		if isRibbonRoot(obj):
 			# to simplify check of menubar items
-			debugLog("Root, set content")
-			obj.presentationType = obj.presType_content
+#			debugLog("Root, set content")
+			obj.presentationType = content
 			# speed-up: always return immediately
 			return
 		elif obj in self.layoutableObj:
-			debugLog("Redundant obj whose we want children of, set layout")
-			obj.presentationType = obj.presType_layout
+#			debugLog("Redundant obj whose we want children of, set layout")
+			obj.presentationType = layout
 			return
-		elif not obj.name and obj.role == roles.MENUITEM:
-			debugLog("Anonymous menuitem, set layout")
-			obj.presentationType = obj.presType_layout
+		elif not obj.name and objRole == roles.MENUITEM:
+#			debugLog("Anonymous menuitem, set layout")
+			obj.presentationType = layout
 			return
-		elif obj.role == roles.TABCONTROL:
+		elif objRole == roles.TABCONTROL:
 			# to simplify menubar exploration (enforcing)
-			debugLog("Role tabcontrol, set layout")
-			obj.presentationType = obj.presType_layout
+#			debugLog("Role tabcontrol, set layout")
+			obj.presentationType = layout
 			return
 		elif isSubtab(obj):
-			debugLog("Subtab, set content")
-			obj.presentationType = obj.presType_content
+#			debugLog("Subtab, set content")
+			obj.presentationType = content
 			return
 		elif obj in self.expandedMenu:
 			# for expanded menu
-			debugLog("ExpandedMenu, set layout")
-			obj.presentationType = obj.presType_layout
+#			debugLog("ExpandedMenu, set layout")
+			obj.presentationType = layout
 			return
-		elif obj.role == roles.POPUPMENU and not obj.states:
+		elif objRole == roles.POPUPMENU and not obj.states:
 			# to select this as simpleParent when closing submenu
-			debugLog("Role popupmenu without states, set content")
-			obj.presentationType = obj.presType_content
+#			debugLog("Role popupmenu without states, set content")
+			obj.presentationType = content
 			return
 		elif hasattr(obj, "UIAElement") and obj.UIAElement.cachedClassName in ("NetUIRepeatButton", "NetUIScrollBar", "NetUIAppFrameHelper"):
 			# to hide scrolling and window-action buttons
-			debugLog("CachedClassName %s, set unavailable"%obj.UIAElement.cachedClassName)
-			obj.presentationType = obj.presType_unavailable
+#			debugLog("CachedClassName %s, set unavailable"%obj.UIAElement.cachedClassName)
+			obj.presentationType = unavailable
 			return
 		elif not obj.name or obj.name.isspace():
 			# generic
-			debugLog("Anonymous obj, set layout")
-			obj.presentationType = obj.presType_layout
+#			debugLog("Anonymous obj, set layout")
+			obj.presentationType = layout
 			return
-		elif obj.presentationType == obj.presType_unavailable:
+		elif obj.presentationType == unavailable:
 			# for menu items not currently available,
 			# but which we want to show to users
-			debugLog("PresType unavailable, set content")
-			obj.presentationType = obj.presType_content
+#			debugLog("PresType unavailable, set content")
+			obj.presentationType = content
 			return
-		elif obj.role == roles.DATAGRID and obj.description:
+		elif objRole == roles.DATAGRID and obj.description:
 			# to hide in grouping (it should be a grid associated to a visible button)
-			debugLog("Role datagrid has description, set unavailable")
-			obj.presentationType = obj.presType_unavailable
+#			debugLog("Role datagrid has description, set unavailable")
+			obj.presentationType = unavailable
 			return
-		elif obj.role == roles.DATAGRID and not obj.description:
+		elif objRole == roles.DATAGRID and not obj.description:
 			# to show in submenu
 			if allObjPassCheck(lambda i: i.role == roles.GROUPING and i.presentationType == i.presType_content, obj.children):
-				obj.presentationType = obj.presType_layout
+				obj.presentationType = layout
 			else:
 				# ...manage other cases
-				debugLog("...set content")
-				obj.presentationType = obj.presType_content
+#				debugLog("...set content")
+				obj.presentationType = content
 			return
-		elif obj.role == roles.LIST:
+		elif objRole == roles.LIST:
 			# to explore children only
-			debugLog("Role list, set layout")
-			obj.presentationType = obj.presType_layout
+#			debugLog("Role list, set layout")
+			obj.presentationType = layout
 			return
-		elif obj.role == roles.GROUPING:
-			debugLog("Role grouping, set content")
-			obj.presentationType = obj.presType_content
+		elif objRole == roles.GROUPING:
+#			debugLog("Role grouping, set content")
+			obj.presentationType = content
 			return
-		elif obj.role in (roles.GRAPHIC, roles.STATICTEXT):
+		elif objRole in (roles.GRAPHIC, roles.STATICTEXT):
 			# rare and useless, hide
-			debugLog("Role %s, set unavailable"%obj.role)
-			obj.presentationType = obj.presType_unavailable
+#			debugLog("Role %s, set unavailable"%objRole)
+			obj.presentationType = unavailable
 
 	def event_foreground(self, obj, nextHandler):
 		nextHandler()
